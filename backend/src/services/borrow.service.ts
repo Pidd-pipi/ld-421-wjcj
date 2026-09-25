@@ -9,6 +9,9 @@ export const borrowService = {
   },
   create(input: Partial<BorrowRecord>) {
     if (!input.equipmentId) throw new ApiError(400, "EQUIPMENT_REQUIRED", "必须选择设备");
+    const item = equipment.find((entry) => entry.id === input.equipmentId);
+    if (!item) throw new ApiError(404, "EQUIPMENT_NOT_FOUND", "设备不存在");
+    if (item.status === AssetStatus.Retired) throw new ApiError(409, "EQUIPMENT_RETIRED", "设备已报废，不能再提交借用");
     const record: BorrowRecord = {
       id: `br-${Date.now()}`,
       equipmentId: input.equipmentId,

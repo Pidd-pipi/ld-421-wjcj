@@ -15,5 +15,11 @@ export const equipmentController = {
     const item = equipmentService.create(body);
     auditLogMiddleware(user, "CREATE_EQUIPMENT", "Equipment", item.id);
     return item;
+  },
+  retire(user: User, id: string, body: Record<string, unknown>) {
+    rbacMiddleware(user, ["Admin", "LabManager"]);
+    const result = equipmentService.retire(id, String(body.reason ?? ""));
+    auditLogMiddleware(user, "RETIRE_EQUIPMENT", "Equipment", id);
+    return result;
   }
 };

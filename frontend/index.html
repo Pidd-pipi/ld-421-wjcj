@@ -86,8 +86,21 @@
       .badge { display: inline-flex; border-radius: 999px; padding: 4px 9px; font-size: 12px; background: #e7ece8; }
       .badge.Available, .badge.Approved, .badge.Returned, .badge.Pass { color: var(--green); background: #dceee5; }
       .badge.Pending, .badge.Maintenance, .badge.NeedsFollowUp { color: var(--amber); background: #f6ead5; }
-      .badge.Rejected, .badge.Lost, .badge.Fail { color: var(--red); background: #f5dddd; }
+      .badge.Rejected, .badge.Lost, .badge.Fail, .badge.Overdue { color: var(--red); background: #f5dddd; }
+      .badge.Retired, .badge.Cancelled { color: var(--muted); background: #e7ece8; }
       .alert { border-left: 5px solid var(--amber); background: #fff6df; padding: 12px 14px; border-radius: 6px; margin-bottom: 16px; }
+      .alert.error { border-left-color: var(--red); background: #fbeaea; }
+      .alert.success { border-left-color: var(--green); background: #e4f3ea; }
+      button.action:disabled { background: #9aa8a0; cursor: not-allowed; }
+      .tag { display: inline-block; border-radius: 4px; padding: 2px 8px; margin: 2px 4px 2px 0; background: #f5dddd; color: var(--red); font-size: 12px; }
+      .muted { color: var(--muted); }
+      .detail-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+      .modal-mask { position: fixed; inset: 0; background: rgba(20, 30, 25, 0.45); display: none; align-items: center; justify-content: center; z-index: 10; }
+      .modal-mask.open { display: flex; }
+      .modal { background: var(--panel); border-radius: 10px; padding: 22px; width: min(480px, 92vw); }
+      .modal h3 { margin: 0 0 12px; }
+      .modal textarea { width: 100%; min-height: 84px; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-family: inherit; }
+      .modal .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
       @media (max-width: 760px) {
         header { grid-template-columns: 1fr; }
         nav { height: auto; position: static; border-right: 0; border-bottom: 1px solid var(--line); }
@@ -106,6 +119,17 @@
       </nav>
       <main id="app">加载中...</main>
     </header>
+    <div class="modal-mask" id="retire-modal">
+      <div class="modal">
+        <h3>发起报废</h3>
+        <p class="muted">存在未归还借用或未来已批准预约时，提交将被系统拒绝并返回记录编号；无冲突才会标记为已报废，并自动驳回待审批的借用与预约。</p>
+        <textarea id="retire-reason" placeholder="报废原因，例如：核心部件损坏、维修成本超过重置价值"></textarea>
+        <div class="modal-actions">
+          <button class="action secondary" onclick="closeRetireModal()">取消</button>
+          <button class="action warning" onclick="confirmRetire()">确认报废</button>
+        </div>
+      </div>
+    </div>
     <script>
       const api = async (path, options = {}) => {
         const response = await fetch(`/api${path}`, {
@@ -113,12 +137,18 @@
           headers: { "content-type": "application/json", "x-demo-role": "LabManager", ...(options.headers || {}) }
         });
         const payload = await response.json();
-        if (!response.ok) throw new Error(payload.message || "请求失败");
+        if (!response.ok) {
+          const error = new Error(payload.message || "请求失败");
+          error.code = payload.code;
+          error.details = payload.details || null;
+          throw error;
+        }
         return payload.data;
       };
+      const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
       const badge = (value) => `<span class="badge ${value}">${value}</span>`;
       const currency = (value) => new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY", maximumFractionDigits: 0 }).format(value);
-      let state = { view: "dashboard", equipment: [], categories: [], borrow: [], reservations: [], maintenance: null, dashboard: null };
+      let state = { view: "dashboard", equipment: [], categories: [], borrow: [], reservations: [], maintenance: null, dashboard: null, detail: null, detailId: "", retireTarget: "", retireFailure: null, retireResult: null };
 
       async function loadBase() {
         const [equipment, categories] = await Promise.all([api("/equipment"), api("/categories")]);
@@ -127,13 +157,20 @@
       }
       async function show(view) {
         state.view = view;
-        document.querySelectorAll(".nav-button").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
+        state.retireFailure = null;
+        state.retireResult = null;
+        document.querySelectorAll(".nav-button").forEach((button) => button.classList.toggle("active", button.dataset.view === view || (view === "equipment-detail" && button.dataset.view === "equipment")));
         if (!state.equipment.length) await loadBase();
         if (view === "dashboard") state.dashboard = await api("/dashboard");
         if (view === "borrow") state.borrow = await api("/borrow");
         if (view === "reservations") state.reservations = await api("/reservations");
         if (view === "maintenance") state.maintenance = await api("/maintenance");
+        if (view === "equipment-detail") state.detail = await api(`/equipment/${state.detailId}`);
         render();
+      }
+      async function showEquipmentDetail(id) {
+        state.detailId = id;
+        await show("equipment-detail");
       }
       function equipmentName(id) {
         return state.equipment.find((item) => item.id === id)?.name || id;
@@ -155,11 +192,43 @@
         }
         if (state.view === "equipment") {
           app.innerHTML = `<h2>设备管理</h2><div class="toolbar"><input id="q" placeholder="搜索设备/编号/位置" /><button class="action" onclick="createEquipment()">登记入库</button></div>
-          ${table(["设备", "分类", "状态", "位置", "价格"], state.equipment.map((x) => [x.name + "<br><small>" + x.equipmentNo + "</small>", x.categoryId, badge(x.status), x.location, currency(x.purchasePrice)]))}`;
+          ${state.retireResult ? `<div class="alert success">${esc(state.retireResult)}</div>` : ""}
+          ${table(["设备", "分类", "状态", "位置", "价格", "操作"], state.equipment.map((x) => [x.name + "<br><small>" + x.equipmentNo + "</small>", x.categoryId, badge(x.status), x.location, currency(x.purchasePrice), `<button class="action secondary" onclick="showEquipmentDetail('${x.id}')">详情</button> <button class="action warning" ${x.status === "Retired" ? "disabled" : ""} onclick="openRetireModal('${x.id}')">报废</button>`]))}`;
           document.getElementById("q").oninput = async (event) => {
             state.equipment = await api(`/equipment?search=${encodeURIComponent(event.target.value)}`);
             render();
           };
+        }
+        if (state.view === "equipment-detail") {
+          const d = state.detail;
+          const blockers = d.retireBlockers || { activeBorrows: [], futureReservations: [] };
+          const blockerCount = blockers.activeBorrows.length + blockers.futureReservations.length;
+          const pendingBorrows = d.borrowHistory.filter((x) => x.status === "Pending").length;
+          const pendingReservations = d.reservationCalendar.filter((x) => x.status === "Pending").length;
+          app.innerHTML = `
+            <div class="detail-head">
+              <h2>${esc(d.name)} ${badge(d.status)}</h2>
+              <div>
+                <button class="action secondary" onclick="show('equipment')">返回列表</button>
+                ${d.status !== "Retired" ? `<button class="action warning" onclick="openRetireModal('${d.id}')">发起报废</button>` : ""}
+              </div>
+            </div>
+            ${state.retireFailure ? `<div class="alert error"><strong>报废失败：${esc(state.retireFailure.message)}</strong><br>${failureDetails(state.retireFailure)}</div>` : ""}
+            ${state.retireResult ? `<div class="alert success">${esc(state.retireResult)}</div>` : ""}
+            <section class="grid">
+              <div class="card">设备编号<div class="stat" style="font-size:18px">${esc(d.equipmentNo)}</div></div>
+              <div class="card">存放位置<div class="stat" style="font-size:18px">${esc(d.location)}</div></div>
+              <div class="card">购买价格<div class="stat" style="font-size:18px">${currency(d.purchasePrice)}</div></div>
+              <div class="card">保修到期<div class="stat" style="font-size:18px">${esc(d.warrantyExpiresAt)}</div></div>
+            </section>
+            ${d.status === "Retired" ? `<div class="alert"><strong>该设备已报废，不能再借用或预约。</strong><br>报废原因：${esc(d.retireReason || "未登记")}<br><span class="muted">报废时间：${esc(d.retiredAt || "—")}</span></div>` : ""}
+            <h2>需优先处理的记录 ${blockerCount ? `<span class="tag">${blockerCount} 项待办结</span>` : `<span class="badge Available">无冲突，可报废</span>`}</h2>
+            ${blockers.activeBorrows.length ? `<h3>未归还借用</h3>${table(["借用编号", "借用人", "预计归还", "状态"], blockers.activeBorrows.map((x) => [x.id, x.borrowerId, x.expectedReturnAt, badge(x.status)]))}` : ""}
+            ${blockers.futureReservations.length ? `<h3>未来已批准预约</h3>${table(["预约编号", "预约人", "开始", "结束"], blockers.futureReservations.map((x) => [x.id, x.reserverId, x.startsAt, x.endsAt]))}` : ""}
+            ${!blockerCount ? `<div class="card">报废提交后，待审批借用 ${pendingBorrows} 条、待审批预约 ${pendingReservations} 条将被自动驳回。</div>` : ""}
+            <h2>借用历史</h2>${table(["编号", "借用人", "借用日", "预计归还", "状态"], d.borrowHistory.map((x) => [x.id, x.borrowerId, x.borrowedAt, x.expectedReturnAt, badge(x.status)]))}
+            <h2>预约记录</h2>${table(["编号", "预约人", "时间段", "状态"], d.reservationCalendar.map((x) => [x.id, x.reserverId, `${x.startsAt} ~ ${x.endsAt}`, badge(x.status)]))}
+            <h2>维护记录</h2>${table(["编号", "类型", "内容", "费用", "结果"], d.maintenanceHistory.map((x) => [x.id, x.type, x.content, currency(x.cost), badge(x.result)]))}`;
         }
         if (state.view === "borrow") {
           app.innerHTML = `<h2>借用管理</h2><div class="toolbar"><button class="action" onclick="createBorrow()">提交借用</button></div>
@@ -179,19 +248,59 @@
       function table(headers, rows) {
         return `<table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
       }
+      function failureDetails(failure) {
+        const parts = [];
+        if (failure.details && failure.details.activeBorrows && failure.details.activeBorrows.length) parts.push(`未归还借用：${failure.details.activeBorrows.map((id) => `<span class="tag">${esc(id)}</span>`).join("")}`);
+        if (failure.details && failure.details.futureReservations && failure.details.futureReservations.length) parts.push(`未来已批准预约：${failure.details.futureReservations.map((id) => `<span class="tag">${esc(id)}</span>`).join("")}`);
+        return parts.length ? `请先办结以下记录后再提交报废：<br>${parts.join("<br>")}` : "请处理冲突记录后重试。";
+      }
+      function openRetireModal(id) {
+        state.retireTarget = id;
+        document.getElementById("retire-reason").value = "";
+        document.getElementById("retire-modal").classList.add("open");
+      }
+      function closeRetireModal() {
+        document.getElementById("retire-modal").classList.remove("open");
+      }
+      async function confirmRetire() {
+        const id = state.retireTarget;
+        const reason = document.getElementById("retire-reason").value.trim();
+        closeRetireModal();
+        try {
+          const result = await api(`/equipment/${id}/retire`, { method: "POST", body: JSON.stringify({ reason }) });
+          state.retireFailure = null;
+          state.retireResult = `已报废：${result.equipment.name}；自动驳回 ${result.rejectedBorrows.length} 条借用、${result.rejectedReservations.length} 条预约`;
+        } catch (error) {
+          state.retireResult = null;
+          state.retireFailure = { message: error.message, details: error.details };
+          state.detailId = id;
+          state.view = "equipment-detail";
+        }
+        state.equipment = await api("/equipment");
+        if (state.view === "equipment-detail") state.detail = await api(`/equipment/${id}`);
+        render();
+      }
       async function createEquipment() {
         await api("/equipment", { method: "POST", body: JSON.stringify({ name: "新登记离心机", equipmentNo: "LAB-CEN-2026-021", purchasePrice: 58000, location: "理科楼-B218" }) });
         state.equipment = await api("/equipment");
         render();
       }
       async function createBorrow() {
-        await api("/borrow", { method: "POST", body: JSON.stringify({ equipmentId: state.equipment[1].id, purpose: "蛋白样品检测" }) });
-        state.borrow = await api("/borrow");
-        render();
+        try {
+          await api("/borrow", { method: "POST", body: JSON.stringify({ equipmentId: state.equipment[1].id, purpose: "蛋白样品检测" }) });
+          state.borrow = await api("/borrow");
+          render();
+        } catch (error) { alert(error.message); }
       }
       async function approveBorrow(id) { await api(`/borrow/${id}/approve`, { method: "PATCH", body: JSON.stringify({ approved: true }) }); state.borrow = await api("/borrow"); render(); }
       async function returnBorrow(id) { await api(`/borrow/${id}/return`, { method: "PATCH", body: JSON.stringify({ condition: "Good" }) }); state.borrow = await api("/borrow"); state.equipment = await api("/equipment"); render(); }
-      async function createReservation() { await api("/reservations", { method: "POST", body: JSON.stringify({ equipmentId: state.equipment[0].id, startsAt: "2026-06-15T09:00:00+08:00", endsAt: "2026-06-15T11:00:00+08:00", purpose: "方法学验证" }) }); state.reservations = await api("/reservations"); render(); }
+      async function createReservation() {
+        try {
+          await api("/reservations", { method: "POST", body: JSON.stringify({ equipmentId: state.equipment[0].id, startsAt: "2026-06-15T09:00:00+08:00", endsAt: "2026-06-15T11:00:00+08:00", purpose: "方法学验证" }) });
+          state.reservations = await api("/reservations");
+          render();
+        } catch (error) { alert(error.message); }
+      }
       async function approveReservation(id) { await api(`/reservations/${id}/approve`, { method: "PATCH", body: JSON.stringify({ approved: true }) }); state.reservations = await api("/reservations"); render(); }
       async function cancelReservation(id) { await api(`/reservations/${id}/cancel`, { method: "PATCH" }); state.reservations = await api("/reservations"); render(); }
       async function createMaintenance() { await api("/maintenance", { method: "POST", body: JSON.stringify({ equipmentId: state.equipment[0].id, type: "Cleaning", content: "流路清洗与光源检查", cost: 800, result: "Pass" }) }); state.maintenance = await api("/maintenance"); render(); }

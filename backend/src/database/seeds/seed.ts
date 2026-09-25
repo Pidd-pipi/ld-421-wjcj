@@ -62,13 +62,32 @@ export const equipment: Equipment[] = [
     supplier: "松下医疗",
     warrantyExpiresAt: "2026-07-01",
     imageUrl: "https://images.unsplash.com/photo-1582719508461-905c673771fd"
+  },
+  {
+    id: "eq-centrifuge-04",
+    name: "高速冷冻离心机",
+    equipmentNo: "LAB-CEN-2018-003",
+    categoryId: "cat-analysis",
+    brandModel: "Eppendorf 5810R",
+    serialNumber: "SN-CEN-30218",
+    purchaseDate: "2018-09-05",
+    purchasePrice: 96000,
+    location: "生命楼-A301-离心间",
+    status: AssetStatus.Retired,
+    ownerId: "u-manager",
+    supplier: "艾本德中国",
+    warrantyExpiresAt: "2021-09-05",
+    imageUrl: "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b",
+    retiredAt: "2026-08-30T09:30:00.000Z",
+    retireReason: "转子腔体腐蚀且压缩机失效，维修报价超过重置价值 60%，按规定报废"
   }
 ];
 
 export const borrowRecords: BorrowRecord[] = [
   { id: "br-001", equipmentId: "eq-hplc-01", borrowerId: "u-researcher", borrowedAt: "2026-06-01", expectedReturnAt: "2026-06-16", purpose: "药物代谢样品检测", status: BorrowStatus.Approved, approverId: "u-manager" },
   { id: "br-002", equipmentId: "eq-micro-02", borrowerId: "u-student", borrowedAt: "2026-06-10", expectedReturnAt: "2026-06-12", purpose: "细胞成像训练", status: BorrowStatus.Pending },
-  { id: "br-003", equipmentId: "eq-sterile-03", borrowerId: "u-student", borrowedAt: "2026-05-20", expectedReturnAt: "2026-05-22", actualReturnAt: "2026-05-23", purpose: "培养基灭菌", status: BorrowStatus.Returned, approverId: "u-manager", returnCondition: ReturnCondition.Good }
+  { id: "br-003", equipmentId: "eq-sterile-03", borrowerId: "u-student", borrowedAt: "2026-05-20", expectedReturnAt: "2026-05-22", actualReturnAt: "2026-05-23", purpose: "培养基灭菌", status: BorrowStatus.Returned, approverId: "u-manager", returnCondition: ReturnCondition.Good },
+  { id: "br-004", equipmentId: "eq-sterile-03", borrowerId: "u-student", borrowedAt: "2026-09-28", expectedReturnAt: "2026-09-30", purpose: "器皿批量灭菌", status: BorrowStatus.Pending }
 ];
 
 export const maintenanceRecords: MaintenanceRecord[] = [
@@ -77,8 +96,9 @@ export const maintenanceRecords: MaintenanceRecord[] = [
 ];
 
 export const reservations: Reservation[] = [
-  { id: "rs-001", equipmentId: "eq-micro-02", reserverId: "u-researcher", startsAt: "2026-06-13T09:00:00+08:00", endsAt: "2026-06-13T12:00:00+08:00", purpose: "免疫荧光图片采集", status: "Approved", approverId: "u-manager" },
-  { id: "rs-002", equipmentId: "eq-hplc-01", reserverId: "u-student", startsAt: "2026-06-14T14:00:00+08:00", endsAt: "2026-06-14T17:30:00+08:00", purpose: "标准曲线复测", status: "Pending" }
+  { id: "rs-001", equipmentId: "eq-micro-02", reserverId: "u-researcher", startsAt: "2026-10-10T09:00:00+08:00", endsAt: "2026-10-10T12:00:00+08:00", purpose: "免疫荧光图片采集", status: "Approved", approverId: "u-manager" },
+  { id: "rs-002", equipmentId: "eq-hplc-01", reserverId: "u-student", startsAt: "2026-10-14T14:00:00+08:00", endsAt: "2026-10-14T17:30:00+08:00", purpose: "标准曲线复测", status: "Pending" },
+  { id: "rs-003", equipmentId: "eq-sterile-03", reserverId: "u-researcher", startsAt: "2026-10-08T10:00:00+08:00", endsAt: "2026-10-08T12:00:00+08:00", purpose: "灭菌锅集中使用", status: "Pending" }
 ];
 
 export const auditLogs: AuditLog[] = [

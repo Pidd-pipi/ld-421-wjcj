@@ -37,6 +37,8 @@ backend/src/
 
 - `GET /api/dashboard`
 - `GET|POST /api/equipment`
+- `GET /api/equipment/:id`（含 `retireBlockers`：未归还借用 + 未来已批准预约）
+- `POST /api/equipment/:id/retire`（报废交接，见下）
 - `GET /api/categories`
 - `GET|POST /api/borrow`
 - `PATCH /api/borrow/:id/approve`
@@ -46,6 +48,13 @@ backend/src/
 - `PATCH /api/reservations/:id/cancel`
 - `GET|POST /api/maintenance`
 - `GET /api/audit-logs`
+
+## 报废交接规则
+
+- 提交报废时系统检查**未归还借用**（Approved/Overdue）与**未来已批准预约**；存在任一记录即返回 `409 EQUIPMENT_RETIRE_BLOCKED`，并在 `details` 中带回冲突记录编号（`activeBorrows` / `futureReservations`）。
+- 无冲突才标记为 `Retired`（记录 `retireReason` / `retiredAt`），同时自动驳回该设备全部待审批借用与预约，响应中返回被驳回记录。
+- 已报废设备再提交借用/预约返回 `409 EQUIPMENT_RETIRED`；重复报废返回 `409 EQUIPMENT_ALREADY_RETIRED`。
+- 设备管理页可查看详情（含需优先处理的记录）并发起报废；报废失败时详情页展示失败原因与冲突编号。
 
 ## 本地验证
 
