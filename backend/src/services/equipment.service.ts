@@ -1,5 +1,5 @@
 import { equipment, categories, borrowRecords, maintenanceRecords, reservations } from "../database/seeds/seed.ts";
-import { AssetStatus } from "../types/enums.ts";
+import { AssetStatus, BorrowStatus } from "../types/enums.ts";
 import type { Equipment } from "../types/interfaces.ts";
 import { ApiError } from "../utils/response.ts";
 
@@ -12,6 +12,19 @@ export const equipmentService = {
       return matchesSearch && matchesCategory;
     });
   },
+  findById(id: string) {
+    return equipment.find((entry) => entry.id === id);
+  },
+  retireBlockers(id: string) {
+    const now = new Date().toISOString();
+    const unreturnedBorrows = borrowRecords.filter(
+      (record) => record.equipmentId === id && (record.status === BorrowStatus.Approved || record.status === BorrowStatus.Overdue)
+    );
+    const upcomingReservations = reservations.filter(
+      (record) => record.equipmentId === id && record.status === "Approved" && record.endsAt >= now
+    );
+    return { unreturnedBorrows, upcomingReservations };
+  },
   detail(id: string) {
     const item = equipment.find((entry) => entry.id === id);
     if (!item) throw new ApiError(404, "EQUIPMENT_NOT_FOUND", "设备不存在");
@@ -20,7 +33,8 @@ export const equipmentService = {
       category: categories.find((category) => category.id === item.categoryId),
       borrowHistory: borrowRecords.filter((record) => record.equipmentId === id),
       maintenanceHistory: maintenanceRecords.filter((record) => record.equipmentId === id),
-      reservationCalendar: reservations.filter((record) => record.equipmentId === id)
+      reservationCalendar: reservations.filter((record) => record.equipmentId === id),
+      retireBlockers: this.retireBlockers(id)
     };
   },
   create(input: Partial<Equipment>) {
@@ -44,12 +58,38 @@ export const equipmentService = {
     return item;
   },
   retire(id: string) {
-    const item = this.detail(id) as Equipment;
+    const item = equipment.find((entry) => entry.id === id);
+    if (!item) throw new ApiError(404, "EQUIPMENT_NOT_FOUND", "设备不存在");
+    if (item.status === AssetStatus.Retired) throw new ApiError(409, "ALREADY_RETIRED", "设备已报废，请勿重复操作");
+    const { unreturnedBorrows, upcomingReservations } = this.retireBlockers(id);
+    if (unreturnedBorrows.length > 0 || upcomingReservations.length > 0) {
+      const borrowIds = unreturnedBorrows.map((record) => record.id);
+      const reservationIds = upcomingReservations.map((record) => record.id);
+      const parts: string[] = [];
+      if (borrowIds.length > 0) parts.push(`未归还借用（${borrowIds.join("、")}）`);
+      if (reservationIds.length > 0) parts.push(`未来已批准预约（${reservationIds.join("、")}）`);
+      throw new ApiError(409, "RETIRE_BLOCKED", `报废被拒绝：存在${parts.join("和")}，请先结清手续`, { borrowIds, reservationIds });
+    }
     item.status = AssetStatus.Retired;
-    return item;
+    const rejectedBorrowIds: string[] = [];
+    for (const record of borrowRecords) {
+      if (record.equipmentId === id && record.status === BorrowStatus.Pending) {
+        record.status = BorrowStatus.Rejected;
+        rejectedBorrowIds.push(record.id);
+      }
+    }
+    const rejectedReservationIds: string[] = [];
+    for (const record of reservations) {
+      if (record.equipmentId === id && record.status === "Pending") {
+        record.status = "Rejected";
+        rejectedReservationIds.push(record.id);
+      }
+    }
+    return { equipment: item, rejectedBorrowIds, rejectedReservationIds };
   },
   transferOwner(id: string, ownerId: string) {
-    const item = this.detail(id) as Equipment;
+    const item = equipment.find((entry) => entry.id === id);
+    if (!item) throw new ApiError(404, "EQUIPMENT_NOT_FOUND", "设备不存在");
     item.ownerId = ownerId;
     return item;
   }

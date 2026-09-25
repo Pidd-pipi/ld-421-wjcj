@@ -113,12 +113,17 @@
           headers: { "content-type": "application/json", "x-demo-role": "LabManager", ...(options.headers || {}) }
         });
         const payload = await response.json();
-        if (!response.ok) throw new Error(payload.message || "请求失败");
+        if (!response.ok) {
+          const error = new Error(payload.message || "请求失败");
+          error.code = payload.code;
+          error.details = payload.details;
+          throw error;
+        }
         return payload.data;
       };
       const badge = (value) => `<span class="badge ${value}">${value}</span>`;
       const currency = (value) => new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY", maximumFractionDigits: 0 }).format(value);
-      let state = { view: "dashboard", equipment: [], categories: [], borrow: [], reservations: [], maintenance: null, dashboard: null };
+      let state = { view: "dashboard", equipment: [], categories: [], borrow: [], reservations: [], maintenance: null, dashboard: null, equipmentDetail: null, retireError: null };
 
       async function loadBase() {
         const [equipment, categories] = await Promise.all([api("/equipment"), api("/categories")]);
@@ -155,11 +160,31 @@
         }
         if (state.view === "equipment") {
           app.innerHTML = `<h2>设备管理</h2><div class="toolbar"><input id="q" placeholder="搜索设备/编号/位置" /><button class="action" onclick="createEquipment()">登记入库</button></div>
-          ${table(["设备", "分类", "状态", "位置", "价格"], state.equipment.map((x) => [x.name + "<br><small>" + x.equipmentNo + "</small>", x.categoryId, badge(x.status), x.location, currency(x.purchasePrice)]))}`;
+          ${table(["设备", "分类", "状态", "位置", "价格", "操作"], state.equipment.map((x) => [x.name + "<br><small>" + x.equipmentNo + "</small>", x.categoryId, badge(x.status), x.location, currency(x.purchasePrice), `<button class="action secondary" onclick="showEquipmentDetail('${x.id}')">详情</button> ${x.status !== "Retired" ? `<button class="action warning" onclick="retireEquipment('${x.id}')">报废</button>` : ""}`]))}`;
           document.getElementById("q").oninput = async (event) => {
             state.equipment = await api(`/equipment?search=${encodeURIComponent(event.target.value)}`);
             render();
           };
+        }
+        if (state.view === "equipment-detail") {
+          const d = state.equipmentDetail;
+          const blockers = d.retireBlockers || { unreturnedBorrows: [], upcomingReservations: [] };
+          const blockerItems = [
+            ...blockers.unreturnedBorrows.map((r) => `未归还借用 ${r.id}：${r.purpose}（应还 ${r.expectedReturnAt}）`),
+            ...blockers.upcomingReservations.map((r) => `未来已批准预约 ${r.id}：${r.purpose}（${r.startsAt}）`)
+          ];
+          app.innerHTML = `<h2>设备详情 ${badge(d.status)}</h2>
+            <div class="toolbar"><button class="action secondary" onclick="show('equipment')">返回列表</button>
+            ${d.status !== "Retired" ? `<button class="action warning" onclick="retireEquipment('${d.id}')">报废</button>` : ""}</div>
+            ${state.retireError ? `<div class="alert" style="border-color: var(--red); background: #fbe9e9;">报废失败：${state.retireError.message}<br><strong>需优先处理的记录：</strong>${[...state.retireError.borrowIds, ...state.retireError.reservationIds].join("、")}</div>` : ""}
+            ${blockerItems.length ? `<div class="alert">报废交接提醒：以下记录未结清，提交报废将被拒绝<br>${blockerItems.join("<br>")}</div>` : ""}
+            <section class="card">
+              <p><strong>${d.name}</strong>（${d.equipmentNo}） ${badge(d.status)}</p>
+              <p>品牌型号：${d.brandModel} ｜ 序列号：${d.serialNumber}</p>
+              <p>存放位置：${d.location} ｜ 采购价格：${currency(d.purchasePrice)} ｜ 保修到期：${d.warrantyExpiresAt}</p>
+            </section>
+            <h2>借用历史</h2>${table(["编号", "借用人", "事由", "预计归还", "状态"], d.borrowHistory.map((x) => [x.id, x.borrowerId, x.purpose, x.expectedReturnAt, badge(x.status)]))}
+            <h2>预约记录</h2>${table(["编号", "预约人", "时间段", "用途", "状态"], d.reservationCalendar.map((x) => [x.id, x.reserverId, `${x.startsAt} ~ ${x.endsAt}`, x.purpose, badge(x.status)]))}`;
         }
         if (state.view === "borrow") {
           app.innerHTML = `<h2>借用管理</h2><div class="toolbar"><button class="action" onclick="createBorrow()">提交借用</button></div>
@@ -182,6 +207,35 @@
       async function createEquipment() {
         await api("/equipment", { method: "POST", body: JSON.stringify({ name: "新登记离心机", equipmentNo: "LAB-CEN-2026-021", purchasePrice: 58000, location: "理科楼-B218" }) });
         state.equipment = await api("/equipment");
+        render();
+      }
+      async function showEquipmentDetail(id) {
+        state.equipmentDetail = await api(`/equipment/${id}`);
+        state.retireError = null;
+        state.view = "equipment-detail";
+        document.querySelectorAll(".nav-button").forEach((button) => button.classList.toggle("active", button.dataset.view === "equipment"));
+        render();
+      }
+      async function retireEquipment(id) {
+        try {
+          const result = await api(`/equipment/${id}/retire`, { method: "PATCH" });
+          state.retireError = null;
+          alert(`设备已报废，已驳回待审批借用 ${result.rejectedBorrowIds.length} 条、待审批预约 ${result.rejectedReservationIds.length} 条`);
+        } catch (error) {
+          if (error.code === "RETIRE_BLOCKED") {
+            state.retireError = {
+              message: error.message,
+              borrowIds: error.details?.borrowIds || [],
+              reservationIds: error.details?.reservationIds || []
+            };
+          } else {
+            state.retireError = { message: error.message, borrowIds: [], reservationIds: [] };
+          }
+        }
+        state.equipment = await api("/equipment");
+        state.equipmentDetail = await api(`/equipment/${id}`);
+        state.view = "equipment-detail";
+        document.querySelectorAll(".nav-button").forEach((button) => button.classList.toggle("active", button.dataset.view === "equipment"));
         render();
       }
       async function createBorrow() {

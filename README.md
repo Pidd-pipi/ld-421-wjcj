@@ -37,6 +37,7 @@ backend/src/
 
 - `GET /api/dashboard`
 - `GET|POST /api/equipment`
+- `PATCH /api/equipment/:id/retire`（报废交接：存在未归还借用或未来已批准预约时返回 409 及记录编号；无冲突则标记报废并驳回待审批借用/预约）
 - `GET /api/categories`
 - `GET|POST /api/borrow`
 - `PATCH /api/borrow/:id/approve`

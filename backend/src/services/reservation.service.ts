@@ -1,4 +1,5 @@
-import { reservations } from "../database/seeds/seed.ts";
+import { equipment, reservations } from "../database/seeds/seed.ts";
+import { AssetStatus } from "../types/enums.ts";
 import type { Reservation } from "../types/interfaces.ts";
 import { ApiError } from "../utils/response.ts";
 
@@ -8,6 +9,10 @@ export const reservationService = {
   },
   create(input: Partial<Reservation>) {
     if (!input.equipmentId || !input.startsAt || !input.endsAt) throw new ApiError(400, "RESERVATION_INVALID", "设备和时间段必填");
+    const item = equipment.find((entry) => entry.id === input.equipmentId);
+    if (!item) throw new ApiError(404, "EQUIPMENT_NOT_FOUND", "设备不存在");
+    if (item.status === AssetStatus.Retired) throw new ApiError(409, "EQUIPMENT_RETIRED", "设备已报废，不能再预约");
+    if (item.status === AssetStatus.Lost) throw new ApiError(409, "EQUIPMENT_LOST", "设备已遗失，不能预约");
     const record: Reservation = {
       id: `rs-${Date.now()}`,
       equipmentId: input.equipmentId,

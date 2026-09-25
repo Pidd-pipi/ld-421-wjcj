@@ -1,4 +1,4 @@
-export type { Equipment, EquipmentCategory } from "./equipment";
+export type { Equipment, EquipmentCategory, EquipmentDetail, RetireBlockers, RetireResult } from "./equipment";
 export type { BorrowRecord } from "./borrow";
 export type { MaintenanceRecord } from "./maintenance";
 export type { Reservation } from "./reservation";

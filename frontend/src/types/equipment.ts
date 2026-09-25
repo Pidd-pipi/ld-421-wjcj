@@ -1,4 +1,7 @@
 import type { AssetStatus } from "./enums";
+import type { BorrowRecord } from "./borrow";
+import type { MaintenanceRecord } from "./maintenance";
+import type { Reservation } from "./reservation";
 
 export type Equipment = {
   id: string;
@@ -23,4 +26,23 @@ export type EquipmentCategory = {
   parentId?: string;
   description: string;
   icon: string;
+};
+
+export type RetireBlockers = {
+  unreturnedBorrows: BorrowRecord[];
+  upcomingReservations: Reservation[];
+};
+
+export type EquipmentDetail = Equipment & {
+  category?: EquipmentCategory;
+  borrowHistory: BorrowRecord[];
+  maintenanceHistory: MaintenanceRecord[];
+  reservationCalendar: Reservation[];
+  retireBlockers: RetireBlockers;
+};
+
+export type RetireResult = {
+  equipment: Equipment;
+  rejectedBorrowIds: string[];
+  rejectedReservationIds: string[];
 };
